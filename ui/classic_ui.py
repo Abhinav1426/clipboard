@@ -1,14 +1,22 @@
-"""Classic Tkinter UI for Clipboard Manager."""
+"""Classic Tkinter UI for Clipboard Manager.
+
+Works on Windows, macOS, and Linux.
+Fonts fall back gracefully to the system default if the named font is unavailable.
+Scroll events are handled for both Windows/macOS (MouseWheel) and Linux (Button-4/5).
+"""
 
 import logging
+import sys
 import tkinter as tk
-from tkinter import font as tkfont
 
 import config
 from ui.base_ui import BaseUI
 from utils.text_utils import get_preview
 
 logger = logging.getLogger(__name__)
+
+_F = config.UI_FONT        # sans-serif UI font (platform-aware)
+_M = config.UI_FONT_MONO   # monospace font (platform-aware)
 
 
 class ClassicUI(BaseUI):
@@ -18,13 +26,16 @@ class ClassicUI(BaseUI):
         self._window: tk.Toplevel | None = None
         self._visible = False
         self._list_frame: tk.Frame | None = None
+        self._list_canvas: tk.Canvas | None = None
         self._detail_text: tk.Text | None = None
         self._search_var: tk.StringVar | None = None
+        self._search_entry: tk.Entry | None = None
         self._archive_var: tk.BooleanVar | None = None
         self._status_var: tk.StringVar | None = None
         self._item_widgets: list[tk.Frame] = []
-        self._copied_label: tk.Label | None = None
         self._detail_info: tk.Label | None = None
+
+    # ── Window setup ─────────────────────────────────────────────
 
     def setup_window(self):
         self._root = tk.Tk()
@@ -37,7 +48,6 @@ class ClassicUI(BaseUI):
         self._window.protocol("WM_DELETE_WINDOW", self.hide)
         self._window.configure(bg="#2b2b3d")
 
-        # Icon - use clipboard emoji style
         try:
             self._window.iconbitmap(default="")
         except Exception:
@@ -51,13 +61,13 @@ class ClassicUI(BaseUI):
         top_frame.pack(fill=tk.X)
 
         tk.Label(top_frame, text="🔍 Search:", bg="#2b2b3d", fg="white",
-                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+                 font=(_F, 9)).pack(side=tk.LEFT)
 
         self._search_var = tk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._on_search())
         search_entry = tk.Entry(top_frame, textvariable=self._search_var,
                                 bg="#3c3c54", fg="white", insertbackground="white",
-                                relief=tk.FLAT, font=("Segoe UI", 10))
+                                relief=tk.FLAT, font=(_F, 10))
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 8))
         self._search_entry = search_entry
 
@@ -86,8 +96,6 @@ class ClassicUI(BaseUI):
         list_canvas.create_window((0, 0), window=self._list_frame, anchor="nw",
                                   tags="list_window")
         list_canvas.configure(yscrollcommand=scrollbar.set)
-
-        # Make list_frame fill canvas width
         list_canvas.bind("<Configure>",
                          lambda e: list_canvas.itemconfig("list_window", width=e.width))
 
@@ -95,11 +103,8 @@ class ClassicUI(BaseUI):
         list_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._list_canvas = list_canvas
 
-        # Mouse wheel scrolling
-        def _on_mousewheel(event):
-            list_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        list_canvas.bind("<MouseWheel>", _on_mousewheel)
-        self._list_frame.bind("<MouseWheel>", _on_mousewheel)
+        self._bind_scroll(list_canvas)
+        self._bind_scroll(self._list_frame)
 
         # Right: detail panel
         right_frame = tk.Frame(main_frame, bg="#252538", width=230, relief=tk.FLAT, bd=1)
@@ -107,17 +112,17 @@ class ClassicUI(BaseUI):
         right_frame.pack_propagate(False)
 
         tk.Label(right_frame, text="Details", bg="#252538", fg="#aaa",
-                 font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+                 font=(_F, 11, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
 
         self._detail_info = tk.Label(right_frame, text="", bg="#252538", fg="#999",
-                                     font=("Segoe UI", 8), justify=tk.LEFT, anchor="w")
+                                     font=(_F, 8), justify=tk.LEFT, anchor="w")
         self._detail_info.pack(anchor="w", padx=8, fill=tk.X)
 
         tk.Label(right_frame, text="Preview", bg="#252538", fg="#aaa",
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=8, pady=(10, 2))
+                 font=(_F, 10, "bold")).pack(anchor="w", padx=8, pady=(10, 2))
 
         self._detail_text = tk.Text(right_frame, bg="#1e1e2e", fg="#ddd", wrap=tk.WORD,
-                                    relief=tk.FLAT, font=("Consolas", 9),
+                                    relief=tk.FLAT, font=(_M, 9),
                                     state=tk.DISABLED, padx=6, pady=6)
         self._detail_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
@@ -125,10 +130,10 @@ class ClassicUI(BaseUI):
         btn_frame = tk.Frame(w, bg="#2b2b3d", pady=6, padx=8)
         btn_frame.pack(fill=tk.X)
 
-        btn_style = dict(relief=tk.FLAT, font=("Segoe UI", 9, "bold"),
+        btn_style = dict(relief=tk.FLAT, font=(_F, 9, "bold"),
                          cursor="hand2", padx=12, pady=4)
 
-        tk.Button(btn_frame, text="📌 Unpin", bg="#e8a838", fg="white",
+        tk.Button(btn_frame, text="📌 Pin/Unpin", bg="#e8a838", fg="white",
                   command=self.pin_selected, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="📋 Copy", bg="#4caf50", fg="white",
                   command=self.copy_selected, **btn_style).pack(side=tk.LEFT, padx=2)
@@ -140,15 +145,35 @@ class ClassicUI(BaseUI):
         # ── Status bar ───────────────────────────────────────────
         self._status_var = tk.StringVar()
         status_bar = tk.Label(w, textvariable=self._status_var, bg="#1e1e2e", fg="#888",
-                              font=("Segoe UI", 8), anchor="center", pady=2)
+                              font=(_F, 8), anchor="center", pady=2)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
     def bind_events(self):
-        self._window.bind("<Return>", lambda e: self.copy_selected())
-        self._window.bind("<Delete>", lambda e: self.delete_selected())
-        self._window.bind("<Control-p>", lambda e: self.pin_selected())
-        self._window.bind("<Control-f>", lambda e: self._focus_search())
-        self._window.bind("<Escape>", lambda e: self.hide())
+        w = self._window
+        w.bind("<Return>", lambda e: self.copy_selected())
+        w.bind("<Delete>", lambda e: self.delete_selected())
+        # macOS uses Command+P; Windows/Linux use Ctrl+P
+        if sys.platform == "darwin":
+            w.bind("<Command-p>", lambda e: self.pin_selected())
+            w.bind("<Command-f>", lambda e: self._focus_search())
+        else:
+            w.bind("<Control-p>", lambda e: self.pin_selected())
+            w.bind("<Control-f>", lambda e: self._focus_search())
+        w.bind("<Escape>", lambda e: self.hide())
+
+    def _bind_scroll(self, widget):
+        """Bind mouse-wheel scroll: Windows/macOS use MouseWheel, Linux uses Button-4/5."""
+        def _on_wheel(event):
+            if event.delta:
+                self._list_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4:
+                self._list_canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self._list_canvas.yview_scroll(1, "units")
+
+        widget.bind("<MouseWheel>", _on_wheel)   # Windows / macOS
+        widget.bind("<Button-4>", _on_wheel)      # Linux scroll up
+        widget.bind("<Button-5>", _on_wheel)      # Linux scroll down
 
     def _focus_search(self):
         if self._search_entry:
@@ -161,17 +186,12 @@ class ClassicUI(BaseUI):
         query = self._search_var.get() if self._search_var else ""
         include_archives = self._archive_var.get() if self._archive_var else False
 
-        if query.strip():
-            items = self.do_search(query, include_archives)
-        else:
-            items = self.history.get_all_items()
+        items = self.do_search(query, include_archives) if query.strip() else self.history.get_all_items()
 
-        # Clear old widgets
         for widget in self._list_frame.winfo_children():
             widget.destroy()
         self._item_widgets.clear()
 
-        # Separate pinned and current
         pinned = [i for i in items if i.get("pinned")]
         current = [i for i in items if not i.get("pinned")]
 
@@ -185,15 +205,12 @@ class ClassicUI(BaseUI):
             for item in current:
                 self._render_item(item)
 
-        # Update status
         self._status_var.set(self.build_status_text())
-
-        # Update detail for currently selected
         self._update_detail()
 
     def _render_section_header(self, title: str):
         header = tk.Label(self._list_frame, text=title, bg="#1e1e2e", fg="#7e9cd8",
-                          font=("Segoe UI", 9, "bold"), anchor="w", padx=8)
+                          font=(_F, 9, "bold"), anchor="w", padx=8)
         header.pack(fill=tk.X, pady=(6, 2))
 
     def _render_item(self, item: dict):
@@ -203,7 +220,7 @@ class ClassicUI(BaseUI):
         ts = item.get("timestamp", "")[:19].replace("T", " ")
         meta = f"  — {ts} | {len(text)} chars"
         if item.get("pinned"):
-            meta += " | 📌 pinned"
+            meta += " | 📌"
 
         is_selected = (entry_id == self._selected_id)
         bg = "#3c3c54" if is_selected else "#1e1e2e"
@@ -213,14 +230,13 @@ class ClassicUI(BaseUI):
         row.pack(fill=tk.X, pady=1)
 
         preview_label = tk.Label(row, text=preview, bg=bg, fg=fg,
-                                 font=("Segoe UI", 9), anchor="w", wraplength=350)
+                                 font=(_F, 9), anchor="w", wraplength=350)
         preview_label.pack(fill=tk.X, anchor="w")
 
         meta_label = tk.Label(row, text=meta, bg=bg, fg="#888",
-                              font=("Segoe UI", 7), anchor="w")
+                              font=(_F, 7), anchor="w")
         meta_label.pack(fill=tk.X, anchor="w")
 
-        # Bind click
         def on_click(e, eid=entry_id):
             self.set_selected_id(eid)
             self.refresh_list()
@@ -229,20 +245,20 @@ class ClassicUI(BaseUI):
             self.set_selected_id(eid)
             self.copy_selected()
 
-        for widget in (row, preview_label, meta_label):
-            widget.bind("<Button-1>", on_click)
-            widget.bind("<Double-Button-1>", on_double)
-            widget.bind("<MouseWheel>",
-                        lambda e: self._list_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
-
-        # Context menu
         def on_right_click(e, eid=entry_id):
             self.set_selected_id(eid)
             self.refresh_list()
             self._show_context_menu(e)
 
         for widget in (row, preview_label, meta_label):
+            widget.bind("<Button-1>", on_click)
+            widget.bind("<Double-Button-1>", on_double)
             widget.bind("<Button-3>", on_right_click)
+            # Right-click on macOS can also come as Button-2 or Control-Button-1
+            if sys.platform == "darwin":
+                widget.bind("<Button-2>", on_right_click)
+                widget.bind("<Control-Button-1>", on_right_click)
+            self._bind_scroll(widget)
 
         self._item_widgets.append(row)
 
@@ -268,8 +284,7 @@ class ClassicUI(BaseUI):
 
         ts = item.get("timestamp", "")[:19].replace("T", " ")
         text = item.get("text", "")
-        info = f"Copied:  {ts}\nLength:  {len(text)} characters"
-        self._detail_info.config(text=info)
+        self._detail_info.config(text=f"Copied:  {ts}\nLength:  {len(text)} characters")
 
         self._detail_text.config(state=tk.NORMAL)
         self._detail_text.delete("1.0", tk.END)
@@ -279,12 +294,15 @@ class ClassicUI(BaseUI):
     def _on_search(self):
         self.refresh_list()
 
-    # ── Show / Hide ──────────────────────────────────────────────
+    # ── Thread-safe scheduling ───────────────────────────────────
+
+    def _schedule_on_main(self, callback):
+        if self._root:
+            self._root.after(0, callback)
+
+    # ── Show / Hide / Toggle ─────────────────────────────────────
 
     def show(self):
-        if self._visible:
-            self.hide()
-            return
         self.refresh_list()
         self._window.deiconify()
         self._window.lift()
@@ -315,6 +333,6 @@ class ClassicUI(BaseUI):
         self.create_widgets()
         self.bind_events()
         self.refresh_list()
-        self.hide()  # Start hidden
+        self.hide()
         self._schedule_refresh()
         self._root.mainloop()

@@ -44,7 +44,16 @@ class BaseUI(ABC):
     def run(self):
         ...
 
+    @abstractmethod
+    def _schedule_on_main(self, callback):
+        """Schedule callback on the UI main thread (safe to call from any thread)."""
+        ...
+
     # ── Shared concrete logic ────────────────────────────────────
+
+    def thread_safe_toggle(self) -> None:
+        """Toggle visibility from any thread (hotkey callback safe)."""
+        self._schedule_on_main(self.toggle)
 
     def get_selected_id(self) -> str | None:
         return self._selected_id

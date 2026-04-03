@@ -13,10 +13,26 @@ LEGACY_HISTORY_FILE = os.path.join(BASE_DIR, "old_versions", "clipboard_history.
 
 # UI
 DEFAULT_UI = "classic"
-HOTKEY = "win+v"
 AUTO_REFRESH_INTERVAL = 5000  # ms
 PREVIEW_MAX_CHARS = 100
 PREVIEW_DETAIL_MAX_CHARS = 50000
+
+# Platform-aware hotkey (pynput GlobalHotKeys format)
+if sys.platform == "darwin":
+    HOTKEY = "<cmd>+<shift>+v"
+else:
+    HOTKEY = "<ctrl>+<shift>+v"
+
+# Platform-aware fonts (Tkinter falls back gracefully if font not found)
+if sys.platform == "darwin":
+    UI_FONT = "SF Pro Text"
+    UI_FONT_MONO = "Menlo"
+elif sys.platform == "win32":
+    UI_FONT = "Segoe UI"
+    UI_FONT_MONO = "Consolas"
+else:  # Linux and other UNIX
+    UI_FONT = "Ubuntu"
+    UI_FONT_MONO = "Monospace"
 
 # History / Archive
 ITEMS_PER_FILE = 150
@@ -27,9 +43,8 @@ MAX_TEXT_LENGTH = 250000
 # Monitor
 MONITOR_INTERVAL = 0.5  # seconds
 
-# Auto-paste
+# Auto-paste delay (seconds)
 PASTE_DELAY = 0.05
-PASTE_SHORTCUT = "command+v" if sys.platform == "darwin" else "ctrl+v"
 
 # Search
 SEARCH_CACHE_TTL = 300  # seconds
