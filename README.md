@@ -1,5 +1,7 @@
 # Clipboard Manager
 
+**Version 1.0.1** | [Changelog](CHANGELOG.md)
+
 A modular Python desktop clipboard manager with clipboard history tracking, pinning, archive rotation, search, and auto-paste. Works on **Windows, macOS, and Linux**. Supports two UIs: a classic Tkinter interface (default) and a modern CustomTkinter interface.
 
 ---
