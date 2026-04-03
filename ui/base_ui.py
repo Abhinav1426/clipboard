@@ -74,7 +74,18 @@ class BaseUI(ABC):
     def set_selected_id(self, entry_id: str | None) -> None:
         self._selected_id = entry_id
 
+    def copy_to_clipboard(self) -> None:
+        """Copy selected item to clipboard and close — no auto-paste. Used by the Copy button."""
+        entry_id = self.get_selected_id()
+        if not entry_id:
+            return
+        item = self.history.get_by_id(entry_id)
+        if item:
+            self.auto_paste.copy_to_clipboard_only(item["text"])
+            self.hide()
+
     def copy_selected(self) -> None:
+        """Copy + paste at cursor. Used by double-click and Enter."""
         entry_id = self.get_selected_id()
         if not entry_id:
             return

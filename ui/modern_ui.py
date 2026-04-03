@@ -105,7 +105,7 @@ class ModernUI(BaseUI):
                       hover_color="#c98a20", command=self.pin_selected,
                       font=btn_font, width=110).pack(side="left", padx=3)
         ctk.CTkButton(btn_frame, text="📋 Copy", fg_color="#4caf50",
-                      hover_color="#388e3c", command=self.copy_selected,
+                      hover_color="#388e3c", command=self.copy_to_clipboard,
                       font=btn_font, width=90).pack(side="left", padx=3)
         ctk.CTkButton(btn_frame, text="🗑 Delete", fg_color="#e53935",
                       hover_color="#c62828", command=self.delete_selected,

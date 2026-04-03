@@ -5,11 +5,9 @@ Paste strategy per platform:
   macOS   — osascript (built-in), falls back to pynput Cmd+V
   Linux   — xdotool (if installed), falls back to pynput Ctrl+V
 
-The caller must:
-  1. Call record_foreground_window() BEFORE the clipboard manager window appears
-  2. Call copy_only(text)
-  3. Hide the clipboard manager window
-  4. Call send_paste() — which restores focus and fires the keystroke
+Two copy modes:
+  copy_to_clipboard_only() — copy + close window, NO paste (Copy button)
+  copy_only() + send_paste() — copy + close + paste at cursor (double-click / Enter)
 """
 
 import logging
@@ -30,14 +28,14 @@ _controller = Controller()
 class AutoPaste:
     def __init__(self, clipboard_monitor):
         self._monitor = clipboard_monitor
-        self._prev_hwnd = None   # Windows: HWND of the window that had focus before us
+        self._prev_hwnd = None   # Windows: HWND that had focus before the clipboard manager
 
     # ── Public API ───────────────────────────────────────────────
 
     def record_foreground_window(self) -> None:
         """Capture the currently focused window handle (Windows only).
-        Call this BEFORE the clipboard manager window is shown so we know
-        which window to restore focus to when we paste.
+        Call BEFORE showing the clipboard manager so we know which window
+        to restore focus to when pasting.
         """
         if sys.platform == "win32":
             try:
@@ -47,8 +45,21 @@ class AutoPaste:
             except Exception as e:
                 logger.debug("GetForegroundWindow failed: %s", e)
 
+    def copy_to_clipboard_only(self, text: str) -> None:
+        """Copy text to clipboard with no paste to follow.
+        Used by the Copy button — sets and immediately clears the internal flag
+        so the clipboard monitor does not re-capture the item.
+        """
+        try:
+            self._monitor.set_internal_copy()
+            pyperclip.copy(text)
+        except Exception as e:
+            logger.error("Copy to clipboard failed: %s", e)
+        finally:
+            self._monitor.clear_internal_copy()
+
     def copy_only(self, text: str) -> None:
-        """Write text to clipboard without sending any keystroke."""
+        """Write text to clipboard. send_paste() must follow to clear the internal flag."""
         try:
             self._monitor.set_internal_copy()
             pyperclip.copy(text)
@@ -57,8 +68,8 @@ class AutoPaste:
             self._monitor.clear_internal_copy()
 
     def send_paste(self) -> None:
-        """Restore focus to the previous window and simulate Ctrl/Cmd+V.
-        Call this after hide() — runs fine from a background thread.
+        """Restore focus to the recorded window and simulate Ctrl/Cmd+V.
+        Call after hide() — safe to run from a background thread.
         """
         try:
             self._restore_focus_and_paste()
@@ -79,19 +90,20 @@ class AutoPaste:
             self._paste_linux()
 
     def _paste_windows(self) -> None:
-        """Restore the previous foreground window, then send Ctrl+V."""
+        """Restore the previous foreground window then send Ctrl+V."""
         if self._prev_hwnd:
             try:
                 import ctypes
-                # Bring the target window back to the foreground.
-                # SW_RESTORE (9) un-minimises if needed.
-                ctypes.windll.user32.ShowWindow(self._prev_hwnd, 9)
-                ctypes.windll.user32.SetForegroundWindow(self._prev_hwnd)
+                user32 = ctypes.windll.user32
+                # SW_RESTORE (9) un-minimises a window but also de-maximises one.
+                # Only call it when the window is actually minimised (IsIconic).
+                if user32.IsIconic(self._prev_hwnd):
+                    user32.ShowWindow(self._prev_hwnd, 9)   # SW_RESTORE
+                user32.SetForegroundWindow(self._prev_hwnd)
                 time.sleep(0.1)   # give Windows time to complete the focus transfer
             except Exception as e:
                 logger.debug("SetForegroundWindow failed: %s", e)
         else:
-            # No saved handle — just wait and hope the OS returns focus
             time.sleep(config.PASTE_DELAY + 0.15)
 
         try:
@@ -103,8 +115,7 @@ class AutoPaste:
 
     def _paste_macos(self) -> None:
         """Use osascript (built-in on every Mac) to send Cmd+V.
-        Falls back to pynput if osascript is unavailable.
-        Requires Accessibility permission either way.
+        Falls back to pynput. Requires Accessibility permission either way.
         """
         time.sleep(config.PASTE_DELAY + 0.1)
         try:

@@ -136,7 +136,7 @@ class ClassicUI(BaseUI):
         tk.Button(btn_frame, text="📌 Pin/Unpin", bg="#e8a838", fg="white",
                   command=self.pin_selected, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="📋 Copy", bg="#4caf50", fg="white",
-                  command=self.copy_selected, **btn_style).pack(side=tk.LEFT, padx=2)
+                  command=self.copy_to_clipboard, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="🗑 Delete", bg="#e53935", fg="white",
                   command=self.delete_selected, **btn_style).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Clear All", bg="#7e57c2", fg="white",
@@ -266,6 +266,7 @@ class ClassicUI(BaseUI):
         menu = tk.Menu(self._window, tearoff=0, bg="#2b2b3d", fg="white",
                        activebackground="#3c3c54")
         menu.add_command(label="Copy & Paste", command=self.copy_selected)
+        menu.add_command(label="Copy Only", command=self.copy_to_clipboard)
         menu.add_command(label="Pin/Unpin", command=self.pin_selected)
         menu.add_command(label="Delete", command=self.delete_selected)
         menu.tk_popup(event.x_root, event.y_root)
