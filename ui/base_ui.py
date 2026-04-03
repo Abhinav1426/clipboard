@@ -6,9 +6,10 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
-# Time (seconds) to wait after hiding the window before sending the paste
-# shortcut. This gives the previously-focused window time to regain focus.
-_FOCUS_RETURN_DELAY = 0.15
+# Delay (seconds) between hide() and send_paste().
+# On Windows focus is restored explicitly via SetForegroundWindow so 0.05s is enough.
+# On macOS/Linux the platform paste methods add their own sleep internally.
+_FOCUS_RETURN_DELAY = 0.05
 
 
 class BaseUI(ABC):
@@ -57,7 +58,14 @@ class BaseUI(ABC):
     # ── Shared concrete logic ────────────────────────────────────
 
     def thread_safe_toggle(self) -> None:
-        """Toggle visibility from any thread (hotkey callback safe)."""
+        """Toggle visibility from any thread (hotkey callback safe).
+
+        Called from pynput's listener thread at the moment the hotkey fires —
+        BEFORE the clipboard manager window is shown — so the previous app
+        still owns focus. We record that window handle here so paste can
+        restore focus to it later.
+        """
+        self.auto_paste.record_foreground_window()
         self._schedule_on_main(self.toggle)
 
     def get_selected_id(self) -> str | None:
