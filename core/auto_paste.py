@@ -1,13 +1,14 @@
 """Auto-paste: copy text to clipboard and simulate a paste keystroke.
 
 Paste strategy per platform:
-  Windows — ctypes SetForegroundWindow restores focus, then pynput Ctrl+V
+  Windows — SetForegroundWindow BEFORE hide() (while we still own focus),
+            then pynput Ctrl+V fires into the already-focused window.
   macOS   — osascript (built-in), falls back to pynput Cmd+V
   Linux   — xdotool (if installed), falls back to pynput Ctrl+V
 
 Two copy modes:
   copy_to_clipboard_only() — copy + close window, NO paste (Copy button)
-  copy_only() + send_paste() — copy + close + paste at cursor (double-click / Enter)
+  copy_only() + restore_focus() + send_paste() — copy + paste at cursor
 """
 
 import logging
@@ -45,6 +46,26 @@ class AutoPaste:
             except Exception as e:
                 logger.debug("GetForegroundWindow failed: %s", e)
 
+    def restore_focus(self) -> None:
+        """Windows only: call SetForegroundWindow BEFORE hiding the clipboard manager.
+
+        SetForegroundWindow only works while our process still owns the foreground.
+        Once our window is hidden/withdrawn, Windows removes that privilege and the
+        call silently fails. Call this first, then hide(), then send_paste().
+        """
+        if sys.platform != "win32" or not self._prev_hwnd:
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            # Un-minimise only if actually minimised — SW_RESTORE de-maximises too.
+            if user32.IsIconic(self._prev_hwnd):
+                user32.ShowWindow(self._prev_hwnd, 9)   # SW_RESTORE
+            user32.SetForegroundWindow(self._prev_hwnd)
+            logger.debug("Focus restored to HWND %s", self._prev_hwnd)
+        except Exception as e:
+            logger.debug("restore_focus failed: %s", e)
+
     def copy_to_clipboard_only(self, text: str) -> None:
         """Copy text to clipboard with no paste to follow.
         Used by the Copy button — sets and immediately clears the internal flag
@@ -68,11 +89,12 @@ class AutoPaste:
             self._monitor.clear_internal_copy()
 
     def send_paste(self) -> None:
-        """Restore focus to the recorded window and simulate Ctrl/Cmd+V.
-        Call after hide() — safe to run from a background thread.
+        """Simulate Ctrl/Cmd+V in the previously focused window.
+        On Windows, focus was already restored by restore_focus() before hide().
+        Safe to call from a background thread.
         """
         try:
-            self._restore_focus_and_paste()
+            self._do_paste()
         except Exception as e:
             logger.error("send_paste failed: %s", e)
         finally:
@@ -81,7 +103,7 @@ class AutoPaste:
 
     # ── Internal ─────────────────────────────────────────────────
 
-    def _restore_focus_and_paste(self) -> None:
+    def _do_paste(self) -> None:
         if sys.platform == "win32":
             self._paste_windows()
         elif sys.platform == "darwin":
@@ -90,22 +112,9 @@ class AutoPaste:
             self._paste_linux()
 
     def _paste_windows(self) -> None:
-        """Restore the previous foreground window then send Ctrl+V."""
-        if self._prev_hwnd:
-            try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                # SW_RESTORE (9) un-minimises a window but also de-maximises one.
-                # Only call it when the window is actually minimised (IsIconic).
-                if user32.IsIconic(self._prev_hwnd):
-                    user32.ShowWindow(self._prev_hwnd, 9)   # SW_RESTORE
-                user32.SetForegroundWindow(self._prev_hwnd)
-                time.sleep(0.1)   # give Windows time to complete the focus transfer
-            except Exception as e:
-                logger.debug("SetForegroundWindow failed: %s", e)
-        else:
-            time.sleep(config.PASTE_DELAY + 0.15)
-
+        """Send Ctrl+V. Focus was already restored by restore_focus() before hide()."""
+        # Give Windows time to finish the focus transition started by restore_focus().
+        time.sleep(config.PASTE_DELAY + 0.1)
         try:
             with _controller.pressed(Key.ctrl):
                 _controller.press("v")

@@ -93,10 +93,13 @@ class BaseUI(ABC):
         if item:
             # 1. Copy to clipboard
             self.auto_paste.copy_only(item["text"])
-            # 2. Hide window so the previous app regains focus
+            # 2. Restore focus to the previous window BEFORE we hide.
+            #    SetForegroundWindow only works while our process still owns the
+            #    foreground — once our window withdraws that privilege is lost.
+            self.auto_paste.restore_focus()
+            # 3. Hide our window (previous app now receives the focus we just granted)
             self.hide()
-            # 3. After the OS returns focus to the previous window, send paste.
-            #    A daemon timer keeps this off the UI thread and auto-exits with the app.
+            # 4. Short pause for the focus transition, then fire the keystroke.
             t = threading.Timer(_FOCUS_RETURN_DELAY, self.auto_paste.send_paste)
             t.daemon = True
             t.start()
