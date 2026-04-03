@@ -1,9 +1,15 @@
 """Abstract base UI with shared concrete logic for clipboard manager."""
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+# Delay (seconds) between hide() and send_paste().
+# On Windows focus is restored explicitly via SetForegroundWindow so 0.05s is enough.
+# On macOS/Linux the platform paste methods add their own sleep internally.
+_FOCUS_RETURN_DELAY = 0.05
 
 
 class BaseUI(ABC):
@@ -52,7 +58,14 @@ class BaseUI(ABC):
     # ── Shared concrete logic ────────────────────────────────────
 
     def thread_safe_toggle(self) -> None:
-        """Toggle visibility from any thread (hotkey callback safe)."""
+        """Toggle visibility from any thread (hotkey callback safe).
+
+        Called from pynput's listener thread at the moment the hotkey fires —
+        BEFORE the clipboard manager window is shown — so the previous app
+        still owns focus. We record that window handle here so paste can
+        restore focus to it later.
+        """
+        self.auto_paste.record_foreground_window()
         self._schedule_on_main(self.toggle)
 
     def get_selected_id(self) -> str | None:
@@ -61,14 +74,35 @@ class BaseUI(ABC):
     def set_selected_id(self, entry_id: str | None) -> None:
         self._selected_id = entry_id
 
-    def copy_selected(self) -> None:
+    def copy_to_clipboard(self) -> None:
+        """Copy selected item to clipboard and close — no auto-paste. Used by the Copy button."""
         entry_id = self.get_selected_id()
         if not entry_id:
             return
         item = self.history.get_by_id(entry_id)
         if item:
-            self.auto_paste.copy_and_paste(item["text"])
+            self.auto_paste.copy_to_clipboard_only(item["text"])
             self.hide()
+
+    def copy_selected(self) -> None:
+        """Copy + paste at cursor. Used by double-click and Enter."""
+        entry_id = self.get_selected_id()
+        if not entry_id:
+            return
+        item = self.history.get_by_id(entry_id)
+        if item:
+            # 1. Copy to clipboard
+            self.auto_paste.copy_only(item["text"])
+            # 2. Restore focus to the previous window BEFORE we hide.
+            #    SetForegroundWindow only works while our process still owns the
+            #    foreground — once our window withdraws that privilege is lost.
+            self.auto_paste.restore_focus()
+            # 3. Hide our window (previous app now receives the focus we just granted)
+            self.hide()
+            # 4. Short pause for the focus transition, then fire the keystroke.
+            t = threading.Timer(_FOCUS_RETURN_DELAY, self.auto_paste.send_paste)
+            t.daemon = True
+            t.start()
 
     def delete_selected(self) -> None:
         entry_id = self.get_selected_id()

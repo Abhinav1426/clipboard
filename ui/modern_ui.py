@@ -38,6 +38,7 @@ class ModernUI(BaseUI):
         self._status_label: ctk.CTkLabel | None = None
         self._detail_info: ctk.CTkLabel | None = None
         self._item_widgets: list = []
+        self._item_map: dict = {}  # entry_id -> {"row": ..., "label": ...}
 
     def setup_window(self):
         ctk.set_appearance_mode("dark")
@@ -105,7 +106,7 @@ class ModernUI(BaseUI):
                       hover_color="#c98a20", command=self.pin_selected,
                       font=btn_font, width=110).pack(side="left", padx=3)
         ctk.CTkButton(btn_frame, text="📋 Copy", fg_color="#4caf50",
-                      hover_color="#388e3c", command=self.copy_selected,
+                      hover_color="#388e3c", command=self.copy_to_clipboard,
                       font=btn_font, width=90).pack(side="left", padx=3)
         ctk.CTkButton(btn_frame, text="🗑 Delete", fg_color="#e53935",
                       hover_color="#c62828", command=self.delete_selected,
@@ -147,6 +148,7 @@ class ModernUI(BaseUI):
         for widget in self._list_frame.winfo_children():
             widget.destroy()
         self._item_widgets.clear()
+        self._item_map.clear()
 
         pinned = [i for i in items if i.get("pinned")]
         current = [i for i in items if not i.get("pinned")]
@@ -193,8 +195,7 @@ class ModernUI(BaseUI):
         meta_label.pack(fill="x", padx=8, pady=(0, 4), anchor="w")
 
         def on_click(e, eid=entry_id):
-            self.set_selected_id(eid)
-            self.refresh_list()
+            self._select_item(eid)
 
         def on_double(e, eid=entry_id):
             self.set_selected_id(eid)
@@ -205,6 +206,21 @@ class ModernUI(BaseUI):
             w.bind("<Double-Button-1>", on_double)
 
         self._item_widgets.append(row)
+        self._item_map[entry_id] = {"row": row, "label": label}
+
+    def _select_item(self, entry_id: str):
+        """Update selection visually without rebuilding the list.
+
+        This avoids destroying widgets on single-click, which would prevent
+        the <Double-Button-1> event from ever firing (the widget that received
+        the first click would no longer exist).
+        """
+        self.set_selected_id(entry_id)
+        for eid, widgets in self._item_map.items():
+            is_sel = (eid == entry_id)
+            widgets["row"].configure(fg_color="#3c3c54" if is_sel else "#1e1e2e")
+            widgets["label"].configure(text_color="#ddd" if is_sel else "#bbb")
+        self._update_detail()
 
     def _update_detail(self):
         if not self._selected_id:
