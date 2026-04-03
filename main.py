@@ -50,7 +50,6 @@ def main():
     history = HistoryManager()
     history.load()
 
-    # Migration from legacy file
     migrated = history.migrate_legacy()
     if migrated:
         logger.info("Migrated %d entries from legacy file", migrated)
@@ -60,7 +59,6 @@ def main():
     monitor = ClipboardMonitor(history)
     paste = AutoPaste(monitor)
 
-    # Startup archive rotation check
     if archive.check_and_rotate():
         logger.info("Startup rotation completed")
 
@@ -77,10 +75,14 @@ def main():
         from ui.classic_ui import ClassicUI
         ui = ClassicUI(history, archive, search, paste)
 
-    # Register global hotkey
+    # Register global hotkey via pynput (cross-platform: Windows / macOS / Linux X11)
+    # The hotkey callback runs in pynput's listener thread, so we schedule on the
+    # UI main thread via thread_safe_toggle() to keep Tkinter thread-safe.
+    hotkey_listener = None
     try:
-        import keyboard
-        keyboard.add_hotkey(config.HOTKEY, lambda: ui.toggle())
+        from pynput import keyboard as kb
+        hotkey_listener = kb.GlobalHotKeys({config.HOTKEY: ui.thread_safe_toggle})
+        hotkey_listener.start()
         logger.info("Global hotkey '%s' registered", config.HOTKEY)
     except Exception as e:
         logger.warning("Could not register hotkey '%s': %s", config.HOTKEY, e)
@@ -92,13 +94,18 @@ def main():
     def shutdown():
         logger.info("Shutting down...")
         monitor.stop()
+        if hotkey_listener is not None:
+            try:
+                hotkey_listener.stop()
+            except Exception:
+                pass
         history.save()
         logger.info("Cleanup complete")
 
     atexit.register(shutdown)
 
-    # Run UI mainloop
     logger.info("Starting Clipboard Manager (%s mode)", ui_mode)
+    logger.info("Toggle hotkey: %s", config.HOTKEY)
     ui.run()
 
 
