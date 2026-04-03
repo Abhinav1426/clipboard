@@ -33,6 +33,7 @@ class ClassicUI(BaseUI):
         self._archive_var: tk.BooleanVar | None = None
         self._status_var: tk.StringVar | None = None
         self._item_widgets: list[tk.Frame] = []
+        self._item_map: dict = {}  # entry_id -> {"row": ..., "label": ...}
         self._detail_info: tk.Label | None = None
 
     # ── Window setup ─────────────────────────────────────────────
@@ -191,6 +192,7 @@ class ClassicUI(BaseUI):
         for widget in self._list_frame.winfo_children():
             widget.destroy()
         self._item_widgets.clear()
+        self._item_map.clear()
 
         pinned = [i for i in items if i.get("pinned")]
         current = [i for i in items if not i.get("pinned")]
@@ -238,16 +240,14 @@ class ClassicUI(BaseUI):
         meta_label.pack(fill=tk.X, anchor="w")
 
         def on_click(e, eid=entry_id):
-            self.set_selected_id(eid)
-            self.refresh_list()
+            self._select_item(eid)
 
         def on_double(e, eid=entry_id):
             self.set_selected_id(eid)
             self.copy_selected()
 
         def on_right_click(e, eid=entry_id):
-            self.set_selected_id(eid)
-            self.refresh_list()
+            self._select_item(eid)
             self._show_context_menu(e)
 
         for widget in (row, preview_label, meta_label):
@@ -261,6 +261,7 @@ class ClassicUI(BaseUI):
             self._bind_scroll(widget)
 
         self._item_widgets.append(row)
+        self._item_map[entry_id] = {"row": row, "label": preview_label}
 
     def _show_context_menu(self, event):
         menu = tk.Menu(self._window, tearoff=0, bg="#2b2b3d", fg="white",
@@ -270,6 +271,24 @@ class ClassicUI(BaseUI):
         menu.add_command(label="Pin/Unpin", command=self.pin_selected)
         menu.add_command(label="Delete", command=self.delete_selected)
         menu.tk_popup(event.x_root, event.y_root)
+
+    def _select_item(self, entry_id: str):
+        """Update selection visually without rebuilding the list.
+
+        Avoids destroying widgets on single-click so that <Double-Button-1>
+        can still fire on the same widget.
+        """
+        self.set_selected_id(entry_id)
+        for eid, widgets in self._item_map.items():
+            is_sel = (eid == entry_id)
+            bg = "#3c3c54" if is_sel else "#1e1e2e"
+            fg = "#fff" if is_sel else "#ccc"
+            widgets["row"].configure(bg=bg)
+            widgets["label"].configure(bg=bg, fg=fg)
+            # Also update meta label (second child of row)
+            for child in widgets["row"].winfo_children():
+                child.configure(bg=bg)
+        self._update_detail()
 
     def _update_detail(self):
         if not self._selected_id:
