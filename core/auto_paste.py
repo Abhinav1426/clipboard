@@ -28,16 +28,23 @@ class AutoPaste:
     def __init__(self, clipboard_monitor):
         self._monitor = clipboard_monitor
 
-    def copy_and_paste(self, text: str) -> None:
-        """Copy text to clipboard and simulate paste into the active window."""
+    def copy_only(self, text: str) -> None:
+        """Copy text to clipboard without simulating a paste keystroke."""
         try:
             self._monitor.set_internal_copy()
             pyperclip.copy(text)
+        except Exception as e:
+            logger.error("Copy failed: %s", e)
+            self._monitor.clear_internal_copy()
+
+    def send_paste(self) -> None:
+        """Simulate the paste shortcut and release the internal-copy flag."""
+        try:
             time.sleep(config.PASTE_DELAY)
             self._send_paste()
             time.sleep(config.PASTE_DELAY)
         except Exception as e:
-            logger.error("Auto-paste failed: %s", e)
+            logger.error("Paste failed: %s", e)
         finally:
             self._monitor.clear_internal_copy()
 

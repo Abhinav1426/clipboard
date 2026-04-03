@@ -1,9 +1,14 @@
 """Abstract base UI with shared concrete logic for clipboard manager."""
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+# Time (seconds) to wait after hiding the window before sending the paste
+# shortcut. This gives the previously-focused window time to regain focus.
+_FOCUS_RETURN_DELAY = 0.15
 
 
 class BaseUI(ABC):
@@ -67,8 +72,15 @@ class BaseUI(ABC):
             return
         item = self.history.get_by_id(entry_id)
         if item:
-            self.auto_paste.copy_and_paste(item["text"])
+            # 1. Copy to clipboard
+            self.auto_paste.copy_only(item["text"])
+            # 2. Hide window so the previous app regains focus
             self.hide()
+            # 3. After the OS returns focus to the previous window, send paste.
+            #    A daemon timer keeps this off the UI thread and auto-exits with the app.
+            t = threading.Timer(_FOCUS_RETURN_DELAY, self.auto_paste.send_paste)
+            t.daemon = True
+            t.start()
 
     def delete_selected(self) -> None:
         entry_id = self.get_selected_id()
